@@ -16,16 +16,37 @@
 #include<unistd.h>    //write
 #include<pthread.h> //for threading , link with lpthread
 
+#define MESSAGE_SIZE 256
+#define ACCOUNT_NUM 5
 //the thread function
 void *connection_handler(void *);
 void *server_TCP_handler(void *temp);
 void *server_UDP_handler(void *temp);
 
+//account table
+char* UIDARRAY[ACCOUNT_NUM][16]=
+{
+    "test1",
+    "test2",
+    "test3",
+    "test4",
+    "test5"
+};
+
+char* UPWDARRAY[ACCOUNT_NUM][16]=
+{
+    "test1",
+    "test2",
+    "test3",
+    "test4",
+    "test5"
+};
+
 int main(int argc , char *argv[])
 {
     pthread_t server_tcp_thread;
     pthread_t server_udp_thread;
-    char input_msg[128];
+    char input_msg[MESSAGE_SIZE];
     
     if( pthread_create( &server_tcp_thread , NULL ,  server_TCP_handler , (void*) NULL) < 0)
     {
@@ -52,7 +73,21 @@ int check_login(char* pID,char* pPW)
 {
     printf("login ID:%s",pID);
     printf("login PW:%s",pPW);
-    return 1;
+    
+    for(int i=0;i<ACCOUNT_NUM;i++)
+    {
+        if(0==strcmp(pID,UIDARRAY[i]))
+        {
+            if(0==strcmp(pPW,UPWDARRAY[i]))
+            {
+                return 1;
+            }else
+            {
+                return 0;
+            }
+        }
+    }
+    return 0;
 }
 
 void *server_UDP_handler(void *temp)
@@ -166,32 +201,25 @@ void *server_TCP_handler(void *temp)
 
 /*
  * This will handle connection for each client
- 
- [cmd][msg][lenght][checksum]
- [cmd]
- L:login     [msg]:[login ID]:[login PW]
- M:message   [msg]:[message string]
- 
  * */
 void *connection_handler(void *socket_desc)
 {
     //Get the socket descriptor
     int sock = *(int*)socket_desc;
     int read_size;
-    char *message , client_message[2000];
+    char *message , client_message[MESSAGE_SIZE];
     int login_state=0;
+    int testcounter=0;
     
     //Send some messages to the client
-    message = "Greetings! I am your connection handler\n";
+    message = "connected ACK\n";
     write(sock , message , strlen(message));
     
-    message = "Now type something and i shall repeat what you type \n";
-    write(sock , message , strlen(message));
     
     //login ID/PW
     
     //Receive a message from client
-    while( (read_size = recv(sock , client_message , 2000 , 0)) > 0 )
+    while( (read_size = recv(sock , client_message , MESSAGE_SIZE , 0)) > 0 )
     {
         //Send the message back to client
         //write(sock , client_message , strlen(client_message));
@@ -202,19 +230,23 @@ void *connection_handler(void *socket_desc)
                 {
                     
                     
-                    char* loginID = strtok(message, ",");
-                    char* loginPW=strtok(NULL, message);
+                    char* loginID = strtok(client_message, ",");
+                    char* loginPW=strtok(NULL, client_message);
                     
                     if (check_login(loginID,loginPW)) {
                         login_state=1;
                         message="login success\n";
-                        //write(sock , message , strlen(message));
+                        write(sock , message , strlen(message));
                     }
                 }
                 break;
                 case 'A':
                   message="ACK\n";
-                  write(sock , message , strlen(message));
+                  if(testcounter<5)
+                    write(sock , message , strlen(message));
+
+                  testcounter++;
+                
                 break;
                 case 'M':
                     write(sock , client_message , strlen(client_message));
@@ -241,6 +273,49 @@ void *connection_handler(void *socket_desc)
     free(socket_desc);
     
     return 0;
+}
+//handling message
+/*
+ 
+ [cmd][msg][lenght][checksum]
+ [cmd]
+ L:login     format:L[UID]:[login PW]
+ M:message   format:M[UID]:[message string]
+ B:broadcast format:B[message string]
+ */
+
+void handle_message(char* recv_msg,char* resp_msg)
+{
+    switch(recv_msg[0])
+    {
+        case 'L':
+        {
+            
+            char* temp=recv_msg+1;
+            char* loginID = strtok(temp, ",");
+            char* loginPW=strtok(NULL, temp);
+            
+            if (check_login(loginID,loginPW)) {
+                sprintf(resp_msg, "login success");
+            }
+        }
+            break;
+        case 'A':
+            sprintf(resp_msg, "ACK");
+            break;
+        case 'M':
+        {
+            char* temp=recv_msg+1;
+            char* loginID = strtok(temp, ",");
+            char* msg=strtok(NULL, temp);
+            //write(sock , client_message , strlen(client_message));
+        }
+            break;
+        case 'T':
+            //write(sock , client_message , strlen(client_message));
+            //message="ACK\n";
+            break;
+    }
 }
 
 //database api
