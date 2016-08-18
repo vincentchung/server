@@ -24,7 +24,7 @@ void *server_TCP_handler(void *temp);
 void *server_UDP_handler(void *temp);
 
 //account table
-char* UIDARRAY[ACCOUNT_NUM][16]=
+char UIDARRAY[ACCOUNT_NUM][16]=
 {
     "test1",
     "test2",
@@ -33,7 +33,7 @@ char* UIDARRAY[ACCOUNT_NUM][16]=
     "test5"
 };
 
-char* UPWDARRAY[ACCOUNT_NUM][16]=
+char UPWDARRAY[ACCOUNT_NUM][16]=
 {
     "test1",
     "test2",
@@ -71,13 +71,17 @@ int main(int argc , char *argv[])
 
 int check_login(char* pID,char* pPW)
 {
-    printf("login ID:%s",pID);
-    printf("login PW:%s",pPW);
+    puts(pID);
+    puts("\n");
+    puts(pPW);
+    puts("\n");
     
     for(int i=0;i<ACCOUNT_NUM;i++)
     {
+        puts(UIDARRAY[i]);
         if(0==strcmp(pID,UIDARRAY[i]))
         {
+            puts(UIDARRAY[i]);
             if(0==strcmp(pPW,UPWDARRAY[i]))
             {
                 return 1;
@@ -231,13 +235,20 @@ void *connection_handler(void *socket_desc)
                     
                     
                     char* loginID = strtok(client_message, ",");
-                    char* loginPW=strtok(NULL, client_message);
+                    char* loginPW=strtok(NULL, ",");
                     
-                    if (check_login(loginID,loginPW)) {
+                    if (check_login(loginID+1,loginPW)) {
                         login_state=1;
                         message="login success\n";
                         write(sock , message , strlen(message));
+                    }else
+                    {
+                        message="login error\n";
+                        write(sock , message , strlen(message));
+                        free(socket_desc);
+                        return 0;
                     }
+                    
                 }
                 break;
                 case 'A':
