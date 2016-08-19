@@ -18,10 +18,15 @@
 
 #define MESSAGE_SIZE 256
 #define ACCOUNT_NUM 5
+
+//UDP Multicast message
+#define HELLO_PORT 12345
+#define HELLO_GROUP "225.0.0.37"
 //the thread function
 void *connection_handler(void *);
 void *server_TCP_handler(void *temp);
 void *server_UDP_handler(void *temp);
+void send_UDP_Multicast(char *message);
 
 //account table
 char UIDARRAY[ACCOUNT_NUM][16]=
@@ -41,6 +46,9 @@ char UPWDARRAY[ACCOUNT_NUM][16]=
     "test4",
     "test5"
 };
+
+
+//create one more thread for sending muticast message UDP sender!!!
 
 int main(int argc , char *argv[])
 {
@@ -71,17 +79,10 @@ int main(int argc , char *argv[])
 
 int check_login(char* pID,char* pPW)
 {
-    puts(pID);
-    puts("\n");
-    puts(pPW);
-    puts("\n");
-    
     for(int i=0;i<ACCOUNT_NUM;i++)
     {
-        puts(UIDARRAY[i]);
         if(0==strcmp(pID,UIDARRAY[i]))
         {
-            puts(UIDARRAY[i]);
             if(0==strcmp(pPW,UPWDARRAY[i]))
             {
                 return 1;
@@ -97,13 +98,13 @@ int check_login(char* pID,char* pPW)
 void *server_UDP_handler(void *temp)
 {
     puts("starting UDP server....");
-    
+    char client_message[MESSAGE_SIZE];
+    char* message;
     int udpSocket, nBytes;
-    char buffer[1024];
     struct sockaddr_in serverAddr, clientAddr;
     struct sockaddr_storage serverStorage;
     socklen_t addr_size, client_addr_size;
-    int i;
+    int i,login_state=0,testcounter=0;
     
     /*Create UDP socket*/
     udpSocket = socket(PF_INET, SOCK_DGRAM, 0);
@@ -114,6 +115,7 @@ void *server_UDP_handler(void *temp)
     serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
     memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
     
+    
     /*Bind socket with address struct*/
     bind(udpSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
     
@@ -123,15 +125,55 @@ void *server_UDP_handler(void *temp)
     while(1){
         /* Try to receive any incoming UDP datagram. Address and port of
          requesting client will be stored on serverStorage variable */
-        nBytes = recvfrom(udpSocket,buffer,1024,0,(struct sockaddr *)&serverStorage, &addr_size);
+        nBytes = recvfrom(udpSocket,client_message,MESSAGE_SIZE,0,(struct sockaddr *)&serverStorage, &addr_size);
         
         /*Convert message received to uppercase*/
-        for(i=0;i<nBytes-1;i++)
-            buffer[i] = toupper(buffer[i]);
-        
-        puts(buffer);
         /*Send uppercase message back to client, using serverStorage as the address*/
-        sendto(udpSocket,buffer,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
+        //sendto(udpSocket,buffer,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
+        
+        puts(client_message);
+        switch(client_message[0])
+        {
+            case 'L':
+            {
+                
+                
+                char* loginID = strtok(client_message, ",");
+                char* loginPW=strtok(NULL, ",");
+                
+                if (check_login(loginID+1,loginPW)) {
+                    login_state=1;
+                    message="login success\n";
+                    sendto(udpSocket,message,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
+                }else
+                {
+                    message="login error\n";
+                    sendto(udpSocket,client_message,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
+                    free(udpSocket);
+                    return 0;
+                }
+                
+            }
+                break;
+            case 'A':
+                message="ACK\n";
+                if(testcounter<5)
+                    sendto(udpSocket,client_message,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
+                
+                testcounter++;
+                
+                break;
+            case 'M':
+            {
+                message=client_message+1;
+                send_UDP_Multicast(message);
+            }
+                break;
+            case 'T':
+                //write(sock , client_message , strlen(client_message));
+                message="ACK\n";
+                break;
+        }
     }
     //end
     return 0;
@@ -260,7 +302,10 @@ void *connection_handler(void *socket_desc)
                 
                 break;
                 case 'M':
-                    write(sock , client_message , strlen(client_message));
+                {
+                    message=client_message+1;
+                    send_UDP_Multicast(message);
+                }
                 break;
                 case 'T':
                 //write(sock , client_message , strlen(client_message));
@@ -314,41 +359,45 @@ void handle_message(char* recv_msg,char* resp_msg)
         case 'A':
             sprintf(resp_msg, "ACK");
             break;
-        case 'M':
+            
+        case 'M'://Mulitcast message
         {
             char* temp=recv_msg+1;
-            char* loginID = strtok(temp, ",");
-            char* msg=strtok(NULL, temp);
+            send_UDP_Multicast(temp);
             //write(sock , client_message , strlen(client_message));
         }
             break;
-        case 'T':
+        case 'U':
             //write(sock , client_message , strlen(client_message));
             //message="ACK\n";
             break;
     }
 }
 
-//database api
-#define DB "database.csv" /* database name */
-#define TRY(a)  if (!(a)) {perror(#a);exit(1);}
-#define TRY2(a) if((a)<0) {perror(#a);exit(1);}
-#define FREE(a) if(a) {free(a);a=NULL;}
-#define sort_by(foo) \
-static int by_##foo (const void*p1, const void*p2) { \
-return strcmp ((*(const pdb_t*)p1)->foo, (*(const pdb_t*)p2)->foo); }
-typedef struct db {
-    char title[26];
-    char first_name[26];
-    char last_name[26];
-    time_t date;
-    char publ[100];
-    struct db *next;
-}db_t,*pdb_t;
-typedef int (sort)(const void*, const void*);
-enum {CREATE,PRINT,TITLE,DATE,AUTH,READLINE,READ,SORT,DESTROY};
-static pdb_t dao (int cmd, FILE *f, pdb_t db, sort sortby);
-static char *time2str (time_t *time);
-static time_t str2time (char *date);
+//sending multicast message
 
-
+void send_UDP_Multicast(char *message)
+{
+    struct sockaddr_in addr;
+    int fd, cnt;
+    struct ip_mreq mreq;
+    
+    /* create what looks like an ordinary UDP socket */
+    if ((fd=socket(AF_INET,SOCK_DGRAM,0)) < 0) {
+        perror("socket");
+        return;
+    }
+    
+    /* set up destination address */
+    memset(&addr,0,sizeof(addr));
+    addr.sin_family=AF_INET;
+    addr.sin_addr.s_addr=inet_addr(HELLO_GROUP);
+    addr.sin_port=htons(HELLO_PORT);
+    
+    /* now just sendto() our destination! */
+    if (sendto(fd,message,sizeof(message),0,(struct sockaddr *) &addr,
+               sizeof(addr)) < 0) {
+        perror("sendto");
+        return;
+    }
+}
