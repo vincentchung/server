@@ -16,8 +16,11 @@
 #include<unistd.h>    //write
 #include<pthread.h> //for threading , link with lpthread
 
+#define UID_LENGTH 16
 #define MESSAGE_SIZE 256
 #define ACCOUNT_NUM 5
+#define UNICAST_MSG_NUM 8
+#define UNICAST_MSG_SIZE 32
 
 //UDP Multicast message
 #define HELLO_PORT 12345
@@ -28,8 +31,21 @@ void *server_TCP_handler(void *temp);
 void *server_UDP_handler(void *temp);
 void send_UDP_Multicast(char *message);
 
+typedef struct
+{
+    char TUID[UID_LENGTH];//send to
+    char msg[UNICAST_MSG_SIZE];
+    char SUID[UID_LENGTH];//send from
+    int issend;
+}unicast_msg;
+
+int front=-1;
+int rear=-1;
+int bQueueFull=0;
+
+unicast_msg unicast_queue[UNICAST_MSG_NUM];
 //account table
-char UIDARRAY[ACCOUNT_NUM][16]=
+char UIDARRAY[ACCOUNT_NUM][UID_LENGTH]=
 {
     "test1",
     "test2",
@@ -47,7 +63,63 @@ char UPWDARRAY[ACCOUNT_NUM][16]=
     "test5"
 };
 
+void flush_queue()
+{
+    int counter=0;
+    for(int i=front;i<rear;i++)
+    {
+        if(!unicast_queue[i].issend)
+        {
+            strcpy(  unicast_queue[counter].TUID,unicast_queue[i].TUID);
+            strcpy(  unicast_queue[counter].SUID,unicast_queue[i].SUID);
+            strcpy(  unicast_queue[counter].msg,unicast_queue[i].msg);
+            unicast_queue[counter].issend=0;
+            counter++;
+        }
+    }
+    
+    front=0;
+    rear=counter;
+}
 
+
+void insert_queue(char* uid,char* msg,char* suid)
+{
+    if (front==-1)
+    {
+        front=0;
+        //memset(queue,-1,queue_max);
+    }
+    //check if queue is full
+    if(bQueueFull)
+        return;
+    
+    rear++;
+    strcpy(  unicast_queue[rear].TUID,uid);
+    strcpy(  unicast_queue[rear].SUID,suid);
+    strcpy(  unicast_queue[rear].msg,msg);
+    unicast_queue[rear].issend=0;
+    
+    if(rear==(UNICAST_MSG_NUM-1))
+    {
+        if(front==0)
+            bQueueFull=1;
+        else
+            flush_queue();
+    }
+}
+
+int dequeue(char* uid)
+{
+    for(int i=0;i<rear;i++)
+    {
+        if(!strcmp(unicast_queue[i].TUID,uid))
+        {
+            return i;
+        }
+    }
+    return -1;
+}
 //create one more thread for sending muticast message UDP sender!!!
 
 int main(int argc , char *argv[])
@@ -122,6 +194,10 @@ void *server_UDP_handler(void *temp)
     /*Initialize size variable to be used later on*/
     addr_size = sizeof serverStorage;
     
+    message = "connected ACK\n";
+    sendto(udpSocket,message,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
+    
+    
     while(1){
         /* Try to receive any incoming UDP datagram. Address and port of
          requesting client will be stored on serverStorage variable */
@@ -157,7 +233,7 @@ void *server_UDP_handler(void *temp)
                 break;
             case 'A':
                 message="ACK\n";
-                if(testcounter<5)
+                //if(testcounter<5)
                     sendto(udpSocket,client_message,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
                 
                 testcounter++;
@@ -256,6 +332,7 @@ void *connection_handler(void *socket_desc)
     char *message , client_message[MESSAGE_SIZE];
     int login_state=0;
     int testcounter=0;
+    char UID[UID_LENGTH];
     
     //Send some messages to the client
     message = "connected ACK\n";
@@ -265,23 +342,24 @@ void *connection_handler(void *socket_desc)
     //login ID/PW
     
     //Receive a message from client
-    while( (read_size = recv(sock , client_message , MESSAGE_SIZE , 0)) > 0 )
+    while(1)
     {
-        //Send the message back to client
-        //write(sock , client_message , strlen(client_message));
-        puts(client_message);
-        switch(client_message[0])
+        if( (read_size = recv(sock , client_message , MESSAGE_SIZE , 0)) > 0 )
         {
+            //Send the message back to client
+            //write(sock , client_message , strlen(client_message));
+            puts(client_message);
+            switch(client_message[0])
+            {
                 case 'L':
                 {
-                    
-                    
                     char* loginID = strtok(client_message, ",");
                     char* loginPW=strtok(NULL, ",");
                     
                     if (check_login(loginID+1,loginPW)) {
                         login_state=1;
                         message="login success\n";
+                        strcpy(UID,loginID+1);
                         write(sock , message , strlen(message));
                     }else
                     {
@@ -292,28 +370,46 @@ void *connection_handler(void *socket_desc)
                     }
                     
                 }
-                break;
+                    break;
                 case 'A':
-                  message="ACK\n";
-                  if(testcounter<5)
+                    message="ACK\n";
+                    //if(testcounter<5)
                     write(sock , message , strlen(message));
-
-                  testcounter++;
-                
-                break;
+                    
+                    testcounter++;
+                    
+                    break;
                 case 'M':
                 {
                     message=client_message+1;
                     send_UDP_Multicast(message);
                 }
-                break;
+                    break;
                 case 'T':
-                //write(sock , client_message , strlen(client_message));
-                message="ACK\n";
-                break;
+                    //write(sock , client_message , strlen(client_message));
+                    message="ACK\n";
+                    break;
+                case 'U':
+                {
+                    //send msg to target UID
+                    char* sendUID = strtok(client_message, ",");
+                    char* msg=strtok(NULL, ",");
+                    insert_queue(sendUID, msg, UID);
+                }
+                    break;
+            }
+            //memset(client_message, 0, 20000);
         }
-        //memset(client_message, 0, 20000);
+        //sending unicast message
+        {
+            char temp[MESSAGE_SIZE];
+            int id=dequeue(UID);
+            unicast_queue[id].issend=1;
+            sprintf(temp, "%s:%s",unicast_queue[id].SUID,unicast_queue[id].msg);
+            write(sock , unicast_queue[id].msg , strlen(unicast_queue[id].msg));
+        }
     }
+    
     
     if(read_size == 0)
     {
