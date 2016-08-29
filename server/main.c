@@ -39,11 +39,26 @@ typedef struct
     int issend;
 }unicast_msg;
 
+
+typedef struct
+{
+    int idkey;
+    char UID[UID_LENGTH];
+    char PWD[UID_LENGTH];
+    int login;
+}account;
+
 int front=-1;
 int rear=-1;
 int bQueueFull=0;
 
 unicast_msg unicast_queue[UNICAST_MSG_NUM];
+account user_tb[]={
+    {1,"test1","test1",0},
+    {2,"test2","test2",0},
+    {3,"test3","test3",0},
+    {4,"test4","test4",0},
+    {5,"test5","test5",0}};
 //account table
 char UIDARRAY[ACCOUNT_NUM][UID_LENGTH]=
 {
@@ -236,7 +251,7 @@ void *server_UDP_handler(void *temp)
         /*Send uppercase message back to client, using serverStorage as the address*/
         //sendto(udpSocket,buffer,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
         //char UID[UID_LENGTH];
-        puts(client_message);
+        //puts(client_message);
         
         char* UID = strtok(client_message, ",");
         char* UDPclient_message=client_message+strlen(UID)+1;
@@ -264,7 +279,7 @@ void *server_UDP_handler(void *temp)
                 break;
             case 'A':
             {
-                char temp[6]="ACK";
+                char temp[6]="ACK\n";
                 //if(testcounter<5)
                 sendto(udpSocket,temp,strlen(temp),0,(struct sockaddr *)&serverStorage,addr_size);
                 testcounter++;
@@ -272,7 +287,7 @@ void *server_UDP_handler(void *temp)
                 break;
             case 'M':
             {
-                char temp[6]="ACK";
+                char temp[6]="MACK\n";
                 message=UDPclient_message+1;
                 send_UDP_Multicast(message);
                 
@@ -293,10 +308,12 @@ void *server_UDP_handler(void *temp)
                     unicast_queue[id].issend=1;
                     sprintf(temp, "%s:%s",unicast_queue[id].SUID,unicast_queue[id].msg);
                     sendto(udpSocket,temp,strlen(temp),0,(struct sockaddr *)&serverStorage,addr_size);
+                    
                 }else{
                     char temp[6]="NONE";
                     //if(testcounter<5)
                     sendto(udpSocket,temp,strlen(temp),0,(struct sockaddr *)&serverStorage,addr_size);
+                    puts("no message");
                 }
             }
                 break;
@@ -305,9 +322,10 @@ void *server_UDP_handler(void *temp)
                 //send msg to target UID
                 char* sendUID = strtok(UDPclient_message, ",");
                 char* msg=strtok(NULL, ",");
+                char temp[6]="UACK\n";
                 insert_queue(sendUID+1, msg, UID);
-                message="ACK\n";
-                sendto(udpSocket,message,strlen(message),0,(struct sockaddr *)&serverStorage,addr_size);
+                //message="UACK\n";
+                sendto(udpSocket,temp,strlen(temp),0,(struct sockaddr *)&serverStorage,addr_size);
                 listqueue();
             }
                 break;
@@ -442,19 +460,18 @@ void *connection_handler(void *socket_desc)
                 }
                     break;
                 case 'A':
-                    message="ACK\n";
-                    //if(testcounter<5)
-                    write(sock , message , strlen(message));
-                    
+                {
+                    char temp[6]="ACK\n";
+                    write(sock , temp , strlen(message));
                     testcounter++;
-                    
+                }
                     break;
                 case 'M':
                 {
                     message=client_message+1;
                     send_UDP_Multicast(message);
-                    message="ACK\n";
-                    write(sock , message , strlen(message));
+                    char temp[6]="MACK\n";
+                    write(sock , temp , strlen(message));
                 }
                     break;
                 case 'T':
@@ -467,10 +484,10 @@ void *connection_handler(void *socket_desc)
                     char* sendUID = strtok(client_message, ",");
                     char* msg=strtok(NULL, ",");
                     insert_queue(sendUID+1, msg, UID);
-                    message="ACK";
-                    write(sock , message , strlen(message));
+                    char temp[6]="UACK\n";
+                    write(sock , temp , strlen(message));
                     listqueue();
-                }
+                                    }
                     break;
             }
             //memset(client_message, 0, 20000);
@@ -484,6 +501,7 @@ void *connection_handler(void *socket_desc)
                 unicast_queue[id].issend=1;
                 sprintf(temp, "%s:%s",unicast_queue[id].SUID,unicast_queue[id].msg);
                 write(sock , temp , strlen(temp));
+                
             }
         }
     }
