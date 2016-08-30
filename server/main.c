@@ -2,11 +2,45 @@
  C socket server application, handles multiple clients using threads
  handling muliple connection
  
+ support TCP and UDP at the sametime!
+ 
+ TCP server port: 8888
+ UDP server port:
+ 
  connecting process
  1. login with ID/PW
  2. clients needs sending local time each 7 secs
  3. server needs sending "ACK" back to client
+
+ Client message format
+ 
+ UDP
+ [source UID],[command][data split by ',']
+ 
+ ex:test1Utest2,hihi
+ 
+ message from : test1
+ command      : U
+ data         : test2,hihi
+ 
+ TCP
+ [command][data split by ',']
+ 
+ ex:Mhihiall
+ 
+ command      : M
+ data         : hihiall
+ 
+ command:
+ L: login
+ U: unicast message to target UID
+ M: Multicast message to everyone
+ C: connecting ack
+ A: timer ACK
+ P: pull unicast message (UDP only)
+ 
  */
+
 
 #include<stdio.h>
 #include<string.h>    //strlen
@@ -21,6 +55,8 @@
 #define ACCOUNT_NUM 5
 #define UNICAST_MSG_NUM 8
 #define UNICAST_MSG_SIZE 32
+#define TCP_SERVER_PORT 8888
+#define UDP_SERVER_PORT 7891
 
 //UDP Multicast message
 #define HELLO_PORT 12345
@@ -81,7 +117,8 @@ char UPWDARRAY[ACCOUNT_NUM][16]=
 void flush_queue()
 {
     int counter=0;
-    for(int i=front;i<rear;i++)
+    int i=0;
+    for(i=front;i<rear;i++)
     {
         if(!unicast_queue[i].issend)
         {
@@ -126,7 +163,8 @@ void insert_queue(char* uid,char* msg,char* suid)
 
 int dequeue(char* uid)
 {
-    for(int i=0;i<=rear;i++)
+    int i=0;
+    for(i=0;i<=rear;i++)
     {
         if(!unicast_queue[i].issend)
         {
@@ -141,8 +179,9 @@ int dequeue(char* uid)
 
 void listqueue()
 {
+    int i=0;
     puts("listqueue:");
-    for(int i=0;i<rear;i++)
+    for(i=0;i<rear;i++)
     {
         //sprintf(<#char *restrict#>, <#const char *restrict, ...#>)
         puts(unicast_queue[i].SUID);
@@ -174,9 +213,6 @@ int main(int argc , char *argv[])
         
     return 0;
 }
-////////login ID/PW table
-
-
 
 int check_login(char* pID,char* pPW)
 {
@@ -184,8 +220,9 @@ int check_login(char* pID,char* pPW)
     //puts(pID);
     //puts(pPW);
     //puts(strlen(pPW));
+    int i=0;
     
-    for(int i=0;i<ACCOUNT_NUM;i++)
+    for(i=0;i<ACCOUNT_NUM;i++)
     {
         if(0==strcmp(pID,UIDARRAY[i]))
         {
@@ -211,17 +248,17 @@ void *server_UDP_handler(void *temp)
     char client_message[MESSAGE_SIZE];
     char* message;
     int udpSocket, nBytes;
-    struct sockaddr_in serverAddr, clientAddr;
+    struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
-    socklen_t addr_size, client_addr_size;
-    int i,login_state=0,testcounter=0;
+    socklen_t addr_size;
+    int login_state=0,testcounter=0;
     
     /*Create UDP socket*/
     udpSocket = socket(PF_INET, SOCK_DGRAM, 0);
     
     /*Configure settings in address struct*/
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(7891);
+    serverAddr.sin_port = htons(UDP_SERVER_PORT);
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     
     memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
@@ -230,32 +267,15 @@ void *server_UDP_handler(void *temp)
     /*Bind socket with address struct*/
     bind(udpSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
     
-    
-    //create a thread to handle
-    
     /*Initialize size variable to be used later on*/
     addr_size = sizeof serverStorage;
     
-    //message = "connected ACK\n";
-    //sendto(udpSocket,message,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
-    //UDP msg format
-    //[UID,TCP command format]
-    
     while(1){
-        /* Try to receive any incoming UDP datagram. Address and port of
-         requesting client will be stored on serverStorage variable */
         memset(client_message, 0, MESSAGE_SIZE);
         nBytes = recvfrom(udpSocket,client_message,MESSAGE_SIZE,0,(struct sockaddr *)&serverStorage, &addr_size);
         
-        /*Convert message received to uppercase*/
-        /*Send uppercase message back to client, using serverStorage as the address*/
-        //sendto(udpSocket,buffer,nBytes,0,(struct sockaddr *)&serverStorage,addr_size);
-        //char UID[UID_LENGTH];
-        //puts(client_message);
-        
         char* UID = strtok(client_message, ",");
         char* UDPclient_message=client_message+strlen(UID)+1;
-        //puts(UDPclient_message);
         switch(UDPclient_message[0])
         {
             case 'L':
@@ -264,15 +284,13 @@ void *server_UDP_handler(void *temp)
                 char* loginPW=strtok(NULL, ",");
                 
                 if (check_login(loginID+1,loginPW)) {
+                    char temp[16]="login success\n";
                     login_state=1;
-                    message="login success\n";
-                    sendto(udpSocket,message,strlen(message),0,(struct sockaddr *)&serverStorage,addr_size);
+                    sendto(udpSocket,temp,strlen(temp),0,(struct sockaddr *)&serverStorage,addr_size);
                 }else
                 {
-                    message="login error\n";
-                    sendto(udpSocket,message,strlen(message),0,(struct sockaddr *)&serverStorage,addr_size);
-                    //free(udpSocket);
-                    //return 0;
+                    char temp[16]="login error\n";
+                    sendto(udpSocket,temp,strlen(temp),0,(struct sockaddr *)&serverStorage,addr_size);
                 }
                 
             }
@@ -351,7 +369,7 @@ void *server_TCP_handler(void *temp)
     //Prepare the sockaddr_in structure
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons( 8888 );
+    server.sin_port = htons( TCP_SERVER_PORT );
     
     //Bind
     if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
@@ -434,8 +452,6 @@ void *connection_handler(void *socket_desc)
         memset(client_message, 0, MESSAGE_SIZE);
         if( (read_size = recv(sock , client_message , MESSAGE_SIZE , 0)) > 0 )
         {
-            //Send the message back to client
-            //write(sock , client_message , strlen(client_message));
             puts(client_message);
             switch(client_message[0])
             {
@@ -490,9 +506,8 @@ void *connection_handler(void *socket_desc)
                                     }
                     break;
             }
-            //memset(client_message, 0, 20000);
         }
-        //sending unicast message
+        //checking and sending unicast message
         {
             char temp[MESSAGE_SIZE];
             int id=dequeue(UID);
@@ -507,38 +522,20 @@ void *connection_handler(void *socket_desc)
     }
     
     
-    if(read_size == 0)
-    {
-        puts("Client disconnected");
-        fflush(stdout);
-    }
-    else if(read_size == -1)
-    {
-        perror("recv failed");
-    }
+    puts("Client disconnected");
+    fflush(stdout);
     
     //Free the socket pointer
     free(socket_desc);
     
     return 0;
 }
-//handling message
-/*
- 
- [cmd][msg][lenght][checksum]
- [cmd]
- L:login     format:L[UID]:[login PW]
- M:message   format:M[UID]:[message string]
- B:broadcast format:B[message string]
- */
-
 //sending multicast message
 
 void send_UDP_Multicast(char *message)
 {
     struct sockaddr_in addr;
-    int fd, cnt;
-    struct ip_mreq mreq;
+    int fd;
     
     /* create what looks like an ordinary UDP socket */
     if ((fd=socket(AF_INET,SOCK_DGRAM,0)) < 0) {
